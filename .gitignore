@@ -5,6 +5,8 @@ build/
 dist/
 wheels/
 *.egg-info
+.adk/
+clientdata_accessplan_recomm_agent/.adk/
 
 # Virtual environments
 .venv
