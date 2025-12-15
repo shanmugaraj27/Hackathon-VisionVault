@@ -6,7 +6,7 @@ from google.adk.tools.bigquery.config import BigQueryToolConfig
 from google.adk.tools.bigquery.config import WriteMode
 from .instructions import root_agent_instruction, analyze_enquiry_agent_instruction
 from .custom_bigquery_tool import BigQueryCustomTool
-from callback_logging import log_query_to_model, log_model_response
+from .callback_logging import log_query_to_model, log_model_response
 import google.auth
 import google.cloud.logging
 from typing import Dict, Any
