@@ -1,61 +1,38 @@
 from google.adk.agents.llm_agent import Agent
 from google.adk.agents import SequentialAgent
-from google.adk.tools.bigquery import BigQueryToolset
-from google.adk.tools.bigquery import BigQueryCredentialsConfig
-from google.adk.tools.bigquery.config import BigQueryToolConfig
-from google.adk.tools.bigquery.config import WriteMode
-from .instructions import root_agent_instruction, analyze_enquiry_agent_instruction
-from .custom_bigquery_tool import BigQueryCustomTool
-from callback_logging import log_query_to_model, log_model_response
-import google.auth
-import google.cloud.logging
+from .instructions import root_agent_instruction, analyze_enquiry_agent_instruction, planverification_agent_instruction
+import logging
 from typing import Dict, Any
 
-# Define a tool configuration to block any write operations
-
-cloud_logging_client = google.cloud.logging.Client()
-cloud_logging_client.setup_logging()
-
-creds, project_id = google.auth.default()
-tool_config = BigQueryToolConfig(write_mode=WriteMode.BLOCKED)
-
-# Uses externally-managed Application Default Credentials (ADC) by default.
-# This decouples authentication from the agent / tool lifecycle.
-# https://cloud.google.com/docs/authentication/provide-credentials-adc
-credentials_config = BigQueryCredentialsConfig(credentials=creds)
-
-# Instantiate a BigQuery toolset
-bigquery_toolset = BigQueryToolset(
-    credentials_config=credentials_config, bigquery_tool_config=tool_config
-)
-
-# Initialize custom tool
-custom_tool = BigQueryCustomTool(
-    project_id=project_id,
-    dataset_id="VisionVault_ClientDataAccess",  # Replace with your dataset
-    table_id="UserPlanMapping"        # Replace with your table
-)
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def get_user_info(user_id: str) -> Dict[str, Any]:
     """
     Get user information (username and plan) from BigQuery.
     
-    This function fetches user details from the BigQuery table based on the provided user ID.
-    
     Args:
         user_id: The user ID to look up
         
     Returns:
-        Dictionary containing:
-            - username: The username associated with the user ID
-            - plan: The subscription plan for the user (e.g., 'Gold', 'Silver', etc.)
-            
-    Example:
-        result = get_user_info('user123')
-        # Returns: {'username': 'john_doe', 'plan': 'Gold'}
+        Dictionary containing username and plan
     """
-    return custom_tool.fetch_user_record(user_id)
+    try:
+        from .custom_bigquery_tool import BigQueryCustomTool
+        import google.auth
+        
+        creds, project_id = google.auth.default()
+        custom_tool = BigQueryCustomTool(
+            project_id=project_id,
+            dataset_id="VisionVault_ClientDataAccess",
+            table_id="UserPlanMapping"
+        )
+        return custom_tool.fetch_user_record(user_id)
+    except Exception as e:
+        logger.error(f"Error fetching user info: {e}")
+        return {"username": None, "plan": None, "error": str(e)}
 
 def get_reports_services() -> Dict[str, Any]:
     """
@@ -133,21 +110,17 @@ def verify_plan_access(plan_name: str, reports_data: Dict[str, Any]) -> Dict[str
 analyze_enquiry_agent = Agent(
     model='gemini-2.5-pro',
     name='analyze_enquiry_agent',
-    description='An agent that categorizes a customer enquiry by matching it to services in BigQuery.',
+    description='An agent that categorizes a customer enquiry by matching it to services.',
     instruction=analyze_enquiry_agent_instruction,
-    tools=[bigquery_toolset],
-    before_model_callback=log_query_to_model,
-    after_model_callback=log_model_response,
+    tools=[get_reports_services],
 )
 
 plan_verification_agent = Agent(
     model='gemini-2.5-pro',
     name='plan_verification_agent',
     description='An agent that verifies if a user plan has access to reports and services.',
-    instruction='You are a plan verification agent. You receive the user\'s plan name and reports/services availability data. Your job is to verify if the user\'s plan has access to the available reports and services. Check if the plan name appears in the services data with a non-empty availability indicator (marked with "X"). Provide a clear answer about whether the plan has access or not.',
+    instruction=planverification_agent_instruction,
     tools=[verify_plan_access],
-    before_model_callback=log_query_to_model,
-    after_model_callback=log_model_response,
 )
 
 recommendation_agent = SequentialAgent(
@@ -164,4 +137,6 @@ root_agent = Agent(
     sub_agents=[recommendation_agent],
 )
 
+from google.adk.apps.app import App
 
+app = App(root_agent=root_agent, name="clientdata_accessplan_recomm_agent")
