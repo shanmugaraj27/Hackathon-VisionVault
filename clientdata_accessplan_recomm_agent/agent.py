@@ -4,9 +4,14 @@ from google.adk.tools.bigquery import BigQueryToolset
 from google.adk.tools.bigquery import BigQueryCredentialsConfig
 from google.adk.tools.bigquery.config import BigQueryToolConfig
 from google.adk.tools.bigquery.config import WriteMode
-from .instructions import root_agent_instruction, analyze_enquiry_agent_instruction, plan_upgrade_agent_instruction
+from .instructions import (
+    root_agent_instruction, 
+    analyze_enquiry_agent_instruction, 
+    plan_upgrade_agent_instruction,
+    planverification_agent_instruction
+)
 from .custom_bigquery_tool import BigQueryCustomTool
-from .callback_logging import log_query_to_model, log_model_response
+from .callback_logging import log_query_to_model, log_model_response, suppress_json_output
 import google.auth
 import google.cloud.logging
 from typing import Dict, Any
@@ -177,14 +182,14 @@ analyze_enquiry_agent = Agent(
     instruction=analyze_enquiry_agent_instruction,
     tools=[bigquery_toolset],
     before_model_callback=log_query_to_model,
-    after_model_callback=log_model_response,
+    after_model_callback=suppress_json_output,
 )
 
 plan_verification_agent = Agent(
     model='gemini-2.5-pro',
     name='plan_verification_agent',
-    description='An agent that verifies if a user plan has access to reports and services.',
-    instruction='You are a plan verification agent. You receive the user\'s plan name and reports/services availability data. Your job is to verify if the user\'s plan has access to the available reports and services. Check if the plan name appears in the services data with a non-empty availability indicator (marked with "X"). Provide a clear answer about whether the plan has access or not.',
+    description='An agent that verifies if a user plan has access to reports and services and formats response for user.',
+    instruction=planverification_agent_instruction,
     tools=[verify_plan_access],
     before_model_callback=log_query_to_model,
     after_model_callback=log_model_response,
@@ -198,9 +203,9 @@ recommendation_agent = SequentialAgent(
 plan_upgrade_agent = Agent(
     model='gemini-2.5-pro',
     name='plan_upgrade_agent',
-    description='An agent that helps users upgrade their subscription plan.',
+    description='An agent that helps users request a plan upgrade (does not directly update data).',
     instruction=plan_upgrade_agent_instruction,
-    tools=[update_plan],
+    tools=[],
     before_model_callback=log_query_to_model,
     after_model_callback=log_model_response,
 )
