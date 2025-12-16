@@ -8,7 +8,8 @@ from .instructions import (
     root_agent_instruction, 
     analyze_enquiry_agent_instruction, 
     plan_upgrade_agent_instruction,
-    planverification_agent_instruction
+    planverification_agent_instruction,
+    report_download_agent_instruction
 )
 from .custom_bigquery_tool import BigQueryCustomTool
 from .callback_logging import log_query_to_model, log_model_response, suppress_json_output
@@ -174,6 +175,77 @@ def detect_upgrade_request(user_input: str) -> bool:
     return False
 
 
+def detect_download_response(user_input: str) -> bool:
+    """
+    Detect if the user input is a response to the download question.
+    
+    Checks if the user is responding with yes/no to "Would you like to download this report?"
+    
+    Args:
+        user_input: The user's input message
+        
+    Returns:
+        Boolean indicating if this is a download response
+    """
+    download_response_keywords = [
+        r'\byes\b',
+        r'\bno\b',
+        r'\bsure\b',
+        r'\bproceed\b',
+        r'\bdownload\b',
+        r'\bplease\b',
+        r'\bok\b',
+        r'\bconfirm\b',
+        r'\bnot now\b',
+        r'\bcancel\b',
+        r'\blater\b',
+        r'\bmaybe\b'
+    ]
+    
+    user_input_lower = user_input.lower()
+    for pattern in download_response_keywords:
+        if re.search(pattern, user_input_lower):
+            return True
+    return False
+
+
+def process_report_download(user_response: str) -> Dict[str, Any]:
+    """
+    Process user's response for report download request.
+    
+    This function determines if the user wants to download the report based on their response
+    and returns the appropriate confirmation or declination message.
+    
+    Args:
+        user_response: User's yes/no response to the download question
+        
+    Returns:
+        Dictionary with:
+            - status: "confirmed" or "declined"
+            - message: User-friendly response message
+            - end_enquiry: Boolean indicating if enquiry should end
+    """
+    # Keywords that indicate user wants to download
+    download_keywords = [r'\byes\b', r'\bsure\b', r'\bproceed\b', r'\bdownload\b', r'\bplease\b', r'\bok\b', r'\bconfirm\b']
+    user_response_lower = user_response.lower()
+    
+    wants_download = any(re.search(pattern, user_response_lower) for pattern in download_keywords)
+    
+    if wants_download:
+        return {
+            "status": "confirmed",
+            "message": "✓ Perfect! The report will be sent to your registered email ID. Please check your inbox within the next few minutes.",
+            "end_enquiry": True
+        }
+    else:
+        return {
+            "status": "declined",
+            "message": "No problem! Feel free to reach out whenever you need this report.",
+            "end_enquiry": True
+        }
+
+
+
 
 analyze_enquiry_agent = Agent(
     model='gemini-2.5-pro',
@@ -191,6 +263,16 @@ plan_verification_agent = Agent(
     description='An agent that verifies if a user plan has access to reports and services and formats response for user.',
     instruction=planverification_agent_instruction,
     tools=[verify_plan_access],
+    before_model_callback=log_query_to_model,
+    after_model_callback=log_model_response,
+)
+
+report_download_agent = Agent(
+    model='gemini-2.5-pro',
+    name='report_download_agent',
+    description='An agent that asks users if they want to download the report and sends email confirmation.',
+    instruction=report_download_agent_instruction,
+    tools=[process_report_download],
     before_model_callback=log_query_to_model,
     after_model_callback=log_model_response,
 )
@@ -215,8 +297,8 @@ root_agent = Agent(
     name='uservalidatoragent',
     description='An agent that validates a given userid and routes to appropriate subagent based on user request.',
     instruction=root_agent_instruction,
-    tools=[get_user_info, detect_upgrade_request],
-    sub_agents=[plan_upgrade_agent, recommendation_agent],
+    tools=[get_user_info, detect_upgrade_request, detect_download_response, process_report_download],
+    sub_agents=[plan_upgrade_agent, recommendation_agent, report_download_agent],
 )
 
 
