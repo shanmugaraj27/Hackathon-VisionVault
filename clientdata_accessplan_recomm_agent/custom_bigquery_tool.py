@@ -53,3 +53,51 @@ class BigQueryCustomTool:
             }
         
         return {"username": None, "plan": None}
+    
+    def update_user_plan(self, user_id: str, new_plan: str) -> Dict[str, Any]:
+        """
+        Update a user's plan in BigQuery.
+        
+        Args:
+            user_id: The user ID to update
+            new_plan: The new plan name (Gold, Silver, Bronze)
+            
+        Returns:
+            Dictionary with status and message
+        """
+        # Validate plan name
+        valid_plans = ['Gold', 'Silver', 'Bronze']
+        if new_plan not in valid_plans:
+            return {
+                "success": False,
+                "message": f"Invalid plan: {new_plan}. Valid plans are: {', '.join(valid_plans)}"
+            }
+        
+        query = f"""
+        UPDATE `{self.project_id}.{self.dataset_id}.{self.table_id}`
+        SET `Plan` = @new_plan
+        WHERE `User ID` = @user_id
+        """
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("new_plan", "STRING", new_plan),
+                bigquery.ScalarQueryParameter("user_id", "STRING", user_id)
+            ]
+        )
+        
+        try:
+            query_job = self.client.query(query, job_config=job_config)
+            query_job.result()  # Wait for the query to complete
+            
+            return {
+                "success": True,
+                "message": f"Successfully updated user {user_id} plan to {new_plan}",
+                "user_id": user_id,
+                "new_plan": new_plan
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Error updating plan: {str(e)}"
+            }

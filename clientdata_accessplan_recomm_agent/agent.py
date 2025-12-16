@@ -4,12 +4,13 @@ from google.adk.tools.bigquery import BigQueryToolset
 from google.adk.tools.bigquery import BigQueryCredentialsConfig
 from google.adk.tools.bigquery.config import BigQueryToolConfig
 from google.adk.tools.bigquery.config import WriteMode
-from .instructions import root_agent_instruction, analyze_enquiry_agent_instruction
+from .instructions import root_agent_instruction, analyze_enquiry_agent_instruction, plan_upgrade_agent_instruction
 from .custom_bigquery_tool import BigQueryCustomTool
 from .callback_logging import log_query_to_model, log_model_response
 import google.auth
 import google.cloud.logging
 from typing import Dict, Any
+import re
 
 # Define a tool configuration to block any write operations
 
@@ -128,6 +129,45 @@ def verify_plan_access(plan_name: str, reports_data: Dict[str, Any]) -> Dict[str
         "message": f"{plan_name} plan {'has' if has_access else 'does not have'} access to reports and services"
     }
 
+def update_plan(user_id: str, new_plan: str) -> Dict[str, Any]:
+    """
+    Update a user's subscription plan.
+    
+    Args:
+        user_id: The user ID to update
+        new_plan: The new plan name (Gold, Silver, Bronze)
+        
+    Returns:
+        Dictionary with update status and message
+    """
+    return custom_tool.update_user_plan(user_id, new_plan)
+
+def detect_upgrade_request(user_input: str) -> bool:
+    """
+    Detect if the user input is requesting a plan upgrade.
+    
+    Args:
+        user_input: The user's input message
+        
+    Returns:
+        Boolean indicating if this is an upgrade request
+    """
+    upgrade_keywords = [
+        r'\bupgrade\b',
+        r'\bupgrad.*plan\b',
+        r'\bplan.*upgrad\b',
+        r'\bchange.*plan\b',
+        r'\bswitch.*plan\b',
+        r'\bmodify.*plan\b',
+        r'\bupgrade\s+to\b'
+    ]
+    
+    user_input_lower = user_input.lower()
+    for pattern in upgrade_keywords:
+        if re.search(pattern, user_input_lower):
+            return True
+    return False
+
 
 
 analyze_enquiry_agent = Agent(
@@ -155,13 +195,23 @@ recommendation_agent = SequentialAgent(
     sub_agents=[analyze_enquiry_agent, plan_verification_agent],
 )
 
+plan_upgrade_agent = Agent(
+    model='gemini-2.5-pro',
+    name='plan_upgrade_agent',
+    description='An agent that helps users upgrade their subscription plan.',
+    instruction=plan_upgrade_agent_instruction,
+    tools=[update_plan],
+    before_model_callback=log_query_to_model,
+    after_model_callback=log_model_response,
+)
+
 root_agent = Agent(
     model='gemini-2.5-pro',
     name='uservalidatoragent',
-    description='An agent that validates a given userid.',
+    description='An agent that validates a given userid and routes to appropriate subagent based on user request.',
     instruction=root_agent_instruction,
-    tools=[get_user_info],
-    sub_agents=[recommendation_agent],
+    tools=[get_user_info, detect_upgrade_request],
+    sub_agents=[plan_upgrade_agent, recommendation_agent],
 )
 
 
